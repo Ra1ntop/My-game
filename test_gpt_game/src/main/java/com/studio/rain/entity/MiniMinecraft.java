@@ -1,5 +1,6 @@
 package com.studio.rain.entity;
 
+import com.studio.rain.entity.dw.SimplexNoise;
 import org.lwjgl.glfw.*;
 import org.lwjgl.opengl.*;
 
@@ -196,17 +197,20 @@ public class MiniMinecraft {
     }
 
     private void generateChunk(Chunk chunk) {
-        Random random = new Random(chunk.x * 31 + chunk.z);
+        SimplexNoise noise = new SimplexNoise(new Random(chunk.x * 31 + chunk.z));
         for (int x = 0; x < CHUNK_SIZE; x++) {
             for (int z = 0; z < CHUNK_SIZE; z++) {
-                int height = 64 + random.nextInt(20); // Генерируемая высота мира 64
+                double frequency = 0.05;
+                double amplitude = 32;
+                double heightNoise = noise.noise((chunk.x * CHUNK_SIZE + x) * frequency, (chunk.z * CHUNK_SIZE + z) * frequency) * amplitude;
+                int height = (int) (64 + heightNoise);
                 for (int y = 0; y < CHUNK_HEIGHT; y++) {
                     if (y < height - 4) {
                         chunk.setBlock(x, y, z, 1); // Stone
                     } else if (y < height - 1) {
-                        chunk.setBlock(x, y, z, 2); // Dirt
+                        chunk.setBlock(x, y, z, 3); // Dirt
                     } else if (y == height - 1) {
-                        chunk.setBlock(x, y, z, 3); // Grass
+                        chunk.setBlock(x, y, z, 2); // Grass
                     }
                 }
             }
