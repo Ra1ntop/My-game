@@ -376,6 +376,8 @@ public class MiniMinecraft {
         int getBlock(int x, int y, int z) {
             if (y < 0 || y >= CHUNK_HEIGHT) return 0;
             return blocks[x][y][z];
+
+
         }
 
         void setBlock(int x, int y, int z, int blockType) {
