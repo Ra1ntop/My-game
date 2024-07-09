@@ -327,10 +327,9 @@ public class MiniMinecraft {
             int placeY = result.y + result.face.getOffsetY();
             int placeZ = result.z + result.face.getOffsetZ();
 
-            if (!isBlockIntersectingPlayer(placeX, placeY, placeZ)) {
+            if (!isBlockAt(placeX, placeY, placeZ) && !isBlockIntersectingPlayer(placeX, placeY, placeZ)) {
                 setBlock(placeX, placeY, placeZ, selectedBlock);
                 lastBlockPlacementTime = currentTime; // Обновляем время последней установки блока
-
             }
         }
     }
@@ -342,7 +341,7 @@ public class MiniMinecraft {
     }
 
     private RaycastResult raycast(float maxDist) {
-        float[] start = new float[]{x, y + 1.62f, z}; // Добавляем смещение для глаз игрока
+        float[] start = new float[]{x, y + 1.62f, z}; // Позиция глаз игрока
         float[] dir = getPlayerLookVector();
         float stepSize = 0.05f;
         int steps = (int) (maxDist / stepSize);
@@ -359,7 +358,9 @@ public class MiniMinecraft {
             int blockZ = (int) Math.floor(currentPos[2]);
 
             if (isBlockAt(blockX, blockY, blockZ)) {
-                BlockFace face = getHitFace(currentPos, new float[]{blockX, blockY, blockZ});
+                // Определяем, с какой стороны блока мы столкнулись
+                float[] blockCenter = new float[]{blockX + 0.5f, blockY + 0.5f, blockZ + 0.5f};
+                BlockFace face = getHitFace(currentPos, blockCenter);
                 return new RaycastResult(blockX, blockY, blockZ, face);
             }
         }
@@ -413,36 +414,17 @@ public class MiniMinecraft {
     }
 
 
-    private BlockFace getHitFace(float[] hitPoint, float[] blockPos) {
-        float epsilon = 0.001f;
-        float dx = hitPoint[0] - blockPos[0];
-        float dy = hitPoint[1] - blockPos[1];
-        float dz = hitPoint[2] - blockPos[2];
+    private BlockFace getHitFace(float[] hitPoint, float[] blockCenter) {
+        float dx = hitPoint[0] - blockCenter[0];
+        float dy = hitPoint[1] - blockCenter[1];
+        float dz = hitPoint[2] - blockCenter[2];
 
-        if (Math.abs(dx) < epsilon) return BlockFace.WEST;
-        if (Math.abs(dx - 1) < epsilon) return BlockFace.EAST;
-        if (Math.abs(dy) < epsilon) return BlockFace.DOWN;
-        if (Math.abs(dy - 1) < epsilon) return BlockFace.UP;
-        if (Math.abs(dz) < epsilon) return BlockFace.NORTH;
-        if (Math.abs(dz - 1) < epsilon) return BlockFace.SOUTH;
-
-        // Если не попали точно в грань, выбираем ближайшую
-        float[] distances = {dx, 1-dx, dy, 1-dy, dz, 1-dz};
-        int minIndex = 0;
-        for (int i = 1; i < 6; i++) {
-            if (distances[i] < distances[minIndex]) {
-                minIndex = i;
-            }
-        }
-
-        switch (minIndex) {
-            case 0: return BlockFace.WEST;
-            case 1: return BlockFace.EAST;
-            case 2: return BlockFace.DOWN;
-            case 3: return BlockFace.UP;
-            case 4: return BlockFace.NORTH;
-            case 5: return BlockFace.SOUTH;
-            default: return BlockFace.UP; // Никогда не должно произойти
+        if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > Math.abs(dz)) {
+            return dx > 0 ? BlockFace.EAST : BlockFace.WEST;
+        } else if (Math.abs(dy) > Math.abs(dx) && Math.abs(dy) > Math.abs(dz)) {
+            return dy > 0 ? BlockFace.UP : BlockFace.DOWN;
+        } else {
+            return dz > 0 ? BlockFace.SOUTH : BlockFace.NORTH;
         }
     }
 
