@@ -1,6 +1,7 @@
 package com.studio.rain.entity;
 
 import com.studio.rain.entity.dw.SimplexNoise;
+import org.lwjgl.BufferUtils;
 import org.lwjgl.glfw.*;
 import org.lwjgl.opengl.*;
 
@@ -28,7 +29,7 @@ public class MiniMinecraft {
     private Map<ChunkPosition, Chunk> chunks = new HashMap<>();
 
     private float x = MAP_WIDTH / 2f;
-    private float y = MAP_HEIGHT + 5;
+    private float y = 64 ;
     private float z = MAP_DEPTH / 2f;
     private float rotX = 0;
     private float rotY = 0;
@@ -123,8 +124,7 @@ public class MiniMinecraft {
             glTranslatef(-x, -y, -z);
 
             renderWorld();
-
-            glfwSwapBuffers(window);
+            glfwSwapBuffers(window); // Swap the color buffers
         }
     }
 
@@ -171,6 +171,7 @@ public class MiniMinecraft {
         if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_1) == GLFW_PRESS) placeBlock();
         if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_2) == GLFW_PRESS) breakBlock();
     }
+
 
     private void renderWorld() {
         int playerChunkX = (int) Math.floor(x / CHUNK_SIZE);
@@ -324,6 +325,9 @@ public class MiniMinecraft {
         glFrustum(xmin, xmax, ymin, ymax, zNear, zFar);
     }
 
+
+
+
     private static class ChunkPosition {
         int x, z;
 
@@ -349,13 +353,14 @@ public class MiniMinecraft {
     private class Chunk {
         private int x, z;
         private int[][][] blocks = new int[CHUNK_SIZE][CHUNK_HEIGHT][CHUNK_SIZE];
-        private int displayList;
         private boolean needsUpdate = true;
+        private FloatBuffer vertexBuffer;
+        private FloatBuffer colorBuffer;
+        private int vertexCount;
 
         Chunk(int x, int z) {
             this.x = x;
             this.z = z;
-            this.displayList = glGenLists(1);
         }
 
         void generate() {
@@ -380,8 +385,6 @@ public class MiniMinecraft {
         int getBlock(int x, int y, int z) {
             if (y < 0 || y >= CHUNK_HEIGHT) return 0;
             return blocks[x][y][z];
-
-
         }
 
         void setBlock(int x, int y, int z, int blockType) {
@@ -391,82 +394,122 @@ public class MiniMinecraft {
             }
         }
 
+        private boolean isBlockVisible(int x, int y, int z) {
+            return (x == 0 || x == CHUNK_SIZE - 1 || y == 0 || y == CHUNK_HEIGHT - 1 || z == 0 || z == CHUNK_SIZE - 1)
+                    || (getBlock(x+1, y, z) == 0) || (getBlock(x-1, y, z) == 0)
+                    || (getBlock(x, y+1, z) == 0) || (getBlock(x, y-1, z) == 0)
+                    || (getBlock(x, y, z+1) == 0) || (getBlock(x, y, z-1) == 0);
+        }
+
         void updateGeometry() {
             if (!needsUpdate) return;
 
-            glNewList(displayList, GL_COMPILE);
+            List<Float> vertices = new ArrayList<>();
+            List<Float> colors = new ArrayList<>();
+
             for (int x = 0; x < CHUNK_SIZE; x++) {
                 for (int y = 0; y < CHUNK_HEIGHT; y++) {
                     for (int z = 0; z < CHUNK_SIZE; z++) {
-                        if (blocks[x][y][z] != 0) {
-                            renderBlock(x, y, z, blocks[x][y][z]);
+                        if (blocks[x][y][z] != 0 && isBlockVisible(x, y, z)) {
+                            addBlockToMesh(x, y, z, blocks[x][y][z], vertices, colors);
                         }
                     }
                 }
             }
-            glEndList();
+
+            vertexBuffer = BufferUtils.createFloatBuffer(vertices.size());
+            for (Float v : vertices) {
+                vertexBuffer.put(v);
+            }
+            vertexBuffer.flip();
+
+            colorBuffer = BufferUtils.createFloatBuffer(colors.size());
+            for (Float c : colors) {
+                colorBuffer.put(c);
+            }
+            colorBuffer.flip();
+
+            vertexCount = vertices.size() / 3;
 
             needsUpdate = false;
+        }
+
+        private void addBlockToMesh(int x, int y, int z, int type, List<Float> vertices, List<Float> colors) {
+            float[] blockVertices = {
+                    // Front face
+                    x, y, z+1,
+                    x+1, y, z+1,
+                    x+1, y+1, z+1,
+                    x, y+1, z+1,
+                    // Back face
+                    x, y, z,
+                    x, y+1, z,
+                    x+1, y+1, z,
+                    x+1, y, z,
+                    // Top face
+                    x, y+1, z,
+                    x, y+1, z+1,
+                    x+1, y+1, z+1,
+                    x+1, y+1, z,
+                    // Bottom face
+                    x, y, z,
+                    x+1, y, z,
+                    x+1, y, z+1,
+                    x, y, z+1,
+                    // Left face
+                    x, y, z,
+                    x, y+1, z,
+                    x, y+1, z+1,
+                    x, y, z+1,
+                    // Right face
+                    x+1, y, z,
+                    x+1, y, z+1,
+                    x+1, y+1, z+1,
+                    x+1, y+1, z
+            };
+
+            for (float v : blockVertices) {
+                vertices.add(v);
+            }
+
+            float[] blockColor = getBlockColor(type);
+            for (int i = 0; i < blockVertices.length / 3; i++) {
+                colors.add(blockColor[0]);
+                colors.add(blockColor[1]);
+                colors.add(blockColor[2]);
+            }
+        }
+
+        private float[] getBlockColor(int type) {
+            switch (type) {
+                case 1: return new float[]{0.5f, 0.5f, 0.5f}; // Stone
+                case 2: return new float[]{0.2f, 0.8f, 0.2f}; // Dirt
+                case 3: return new float[]{0.4f, 0.3f, 0.2f}; // Grass
+                case 4: return new float[]{1.0f, 1.0f, 0.0f}; // Highlight
+                default: return new float[]{1.0f, 1.0f, 1.0f};
+            }
         }
 
         void render() {
             if (needsUpdate) {
                 updateGeometry();
             }
+
             glPushMatrix();
             glTranslatef(x * CHUNK_SIZE, 0, z * CHUNK_SIZE);
-            glCallList(displayList);
+
+            glEnableClientState(GL_VERTEX_ARRAY);
+            glEnableClientState(GL_COLOR_ARRAY);
+
+            glVertexPointer(3, GL_FLOAT, 0, vertexBuffer);
+            glColorPointer(3, GL_FLOAT, 0, colorBuffer);
+
+            glDrawArrays(GL_QUADS, 0, vertexCount);
+
+            glDisableClientState(GL_VERTEX_ARRAY);
+            glDisableClientState(GL_COLOR_ARRAY);
+
             glPopMatrix();
-        }
-
-        private void renderBlock(float x, float y, float z, int type) {
-            glColor3f(1.0f, 1.0f, 1.0f);
-
-            switch (type) {
-                case 1: glColor3f(0.5f, 0.5f, 0.5f); break; // Stone
-                case 2: glColor3f(0.2f, 0.8f, 0.2f); break; // Dirt
-                case 3: glColor3f(0.4f, 0.3f, 0.2f); break; // Grass
-                case 4: glColor3f(1.0f, 1.0f, 0.0f); break; // Highlight
-                default: glColor3f(1.0f, 1.0f, 1.0f); break;
-            }
-
-            glBegin(GL_QUADS);
-            // Front Face
-            glVertex3f(x, y, z + 1);
-            glVertex3f(x + 1, y, z + 1);
-            glVertex3f(x + 1, y + 1, z + 1);
-            glVertex3f(x, y + 1, z + 1);
-
-            // Back Face
-            glVertex3f(x, y, z);
-            glVertex3f(x, y + 1, z);
-            glVertex3f(x + 1, y + 1, z);
-            glVertex3f(x + 1, y, z);
-
-            // Top Face
-            glVertex3f(x, y + 1, z);
-            glVertex3f(x, y + 1, z + 1);
-            glVertex3f(x + 1, y + 1, z + 1);
-            glVertex3f(x + 1, y + 1, z);
-
-            // Bottom Face
-            glVertex3f(x, y, z);
-            glVertex3f(x + 1, y, z);
-            glVertex3f(x + 1, y, z + 1);
-            glVertex3f(x, y, z + 1);
-
-            // Left Face
-            glVertex3f(x, y, z);
-            glVertex3f(x, y + 1, z);
-            glVertex3f(x, y + 1, z + 1);
-            glVertex3f(x, y, z + 1);
-
-            // Right Face
-            glVertex3f(x + 1, y, z);
-            glVertex3f(x + 1, y, z + 1);
-            glVertex3f(x + 1, y + 1, z + 1);
-            glVertex3f(x + 1, y + 1, z);
-            glEnd();
         }
     }
 
