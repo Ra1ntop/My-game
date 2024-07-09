@@ -29,7 +29,7 @@ public class MiniMinecraft {
     private Map<ChunkPosition, Chunk> chunks = new HashMap<>();
 
     private float x = MAP_WIDTH / 2f;
-    private float y = 64 ;
+    private float y = 65;
     private float z = MAP_DEPTH / 2f;
     private float rotX = 0;
     private float rotY = 0;
@@ -121,33 +121,45 @@ public class MiniMinecraft {
             glLoadIdentity();
             glRotatef(rotX, 1, 0, 0);
             glRotatef(rotY, 0, 1, 0);
-            glTranslatef(-x, -y, -z);
-
+            glTranslatef(-x, -y-1, -z);
             renderWorld();
+            drawCrosshair();
             glfwSwapBuffers(window); // Swap the color buffers
         }
     }
 
     private void processInput() {
         float speed = 0.1f;
+        float newX = x;
+        float newZ = z;
+
         if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) {
-            x += Math.sin(Math.toRadians(rotY)) * speed;
-            z -= Math.cos(Math.toRadians(rotY)) * speed;
+            newX += Math.sin(Math.toRadians(rotY)) * speed;
+            newZ -= Math.cos(Math.toRadians(rotY)) * speed;
         }
         if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) {
-            x -= Math.sin(Math.toRadians(rotY)) * speed;
-            z += Math.cos(Math.toRadians(rotY)) * speed;
+            newX -= Math.sin(Math.toRadians(rotY)) * speed;
+            newZ += Math.cos(Math.toRadians(rotY)) * speed;
         }
         if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) {
-            x -= Math.cos(Math.toRadians(rotY)) * speed;
-            z -= Math.sin(Math.toRadians(rotY)) * speed;
+            newX -= Math.cos(Math.toRadians(rotY)) * speed;
+            newZ -= Math.sin(Math.toRadians(rotY)) * speed;
         }
         if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) {
-            x += Math.cos(Math.toRadians(rotY)) * speed;
-            z += Math.sin(Math.toRadians(rotY)) * speed;
+            newX += Math.cos(Math.toRadians(rotY)) * speed;
+            newZ += Math.sin(Math.toRadians(rotY)) * speed;
         }
+
+        // Проверка коллизий по X и Z
+        if (!isBlockAt((int)newX, (int)y, (int)z) && !isBlockAt((int)newX, (int)y - 1, (int)z)) {
+            x = newX;
+        }
+        if (!isBlockAt((int)x, (int)y, (int)newZ) && !isBlockAt((int)x, (int)y - 1, (int)newZ)) {
+            z = newZ;
+        }
+
         if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS && onGround) {
-            velocityY = 1.0f;
+            velocityY = 0.2f;
             onGround = false;
         }
 
@@ -155,10 +167,10 @@ public class MiniMinecraft {
         velocityY -= 0.01f;
         if (velocityY < -0.3f) velocityY = -0.3f;
 
-        if (isBlockAt((int) x, (int) y - 2, (int) z)) {
+        if (isBlockAt((int) x, (int) y - 2, (int) z) || isBlockAt((int) x, (int) y - 1, (int) z)) {
             onGround = true;
             velocityY = 0;
-            y = (int) y;
+            y = (float)Math.ceil(y - 1) + 1; // Устанавливаем Y на верх блока + 1
         } else {
             onGround = false;
         }
@@ -254,18 +266,188 @@ public class MiniMinecraft {
     }
 
     private boolean isBlockAt(int x, int y, int z) {
-        int chunkX = x / CHUNK_SIZE;
-        int chunkZ = z / CHUNK_SIZE;
+        if (y < 0 || y >= CHUNK_HEIGHT) return false;
+        int chunkX = Math.floorDiv(x, CHUNK_SIZE);
+        int chunkZ = Math.floorDiv(z, CHUNK_SIZE);
         ChunkPosition chunkPos = new ChunkPosition(chunkX, chunkZ);
 
         if (chunks.containsKey(chunkPos)) {
             Chunk chunk = chunks.get(chunkPos);
-            return chunk.getBlock(x % CHUNK_SIZE, y, z % CHUNK_SIZE) != 0;
+            return chunk.getBlock(Math.floorMod(x, CHUNK_SIZE), y, Math.floorMod(z, CHUNK_SIZE)) != 0;
         }
         return false;
     }
 
+    private void drawCrosshair() {
+        glPushMatrix();
+        glLoadIdentity();
+
+        glDisable(GL_DEPTH_TEST);
+        glMatrixMode(GL_PROJECTION);
+        glPushMatrix();
+        glLoadIdentity();
+        glOrtho(0, WIDTH, HEIGHT, 0, -1, 1);
+        glMatrixMode(GL_MODELVIEW);
+        glLoadIdentity();
+
+        // Установите цвет крестика на белый
+        glColor3f(1.0f, 1.0f, 1.0f);
+
+        // Рисуем горизонтальную линию
+        glBegin(GL_LINES);
+        glVertex2f(WIDTH / 2 - 10, HEIGHT / 2);
+        glVertex2f(WIDTH / 2 + 10, HEIGHT / 2);
+        glEnd();
+
+        // Рисуем вертикальную линию
+        glBegin(GL_LINES);
+        glVertex2f(WIDTH / 2, HEIGHT / 2 - 10);
+        glVertex2f(WIDTH / 2, HEIGHT / 2 + 10);
+        glEnd();
+
+        glEnable(GL_DEPTH_TEST);
+        glMatrixMode(GL_PROJECTION);
+        glPopMatrix();
+        glMatrixMode(GL_MODELVIEW);
+        glPopMatrix();
+    }
+
+    private long lastBlockPlacementTime = 0;
+    private static final long BLOCK_PLACEMENT_COOLDOWN = 250;
+
     private void placeBlock() {
+        long currentTime = System.currentTimeMillis();
+        if (currentTime - lastBlockPlacementTime < BLOCK_PLACEMENT_COOLDOWN) {
+            return; // Еще не прошло достаточно времени с момента последней установки блока
+        }
+
+        RaycastResult result = raycast(5.0f);
+        if (result != null) {
+            int placeX = result.x + result.face.getOffsetX();
+            int placeY = result.y + result.face.getOffsetY();
+            int placeZ = result.z + result.face.getOffsetZ();
+
+            if (!isBlockIntersectingPlayer(placeX, placeY, placeZ)) {
+                setBlock(placeX, placeY, placeZ, selectedBlock);
+                lastBlockPlacementTime = currentTime; // Обновляем время последней установки блока
+
+            }
+        }
+    }
+    private void breakBlock() {
+        RaycastResult result = raycast(5.0f);
+        if (result != null) {
+            setBlock(result.x, result.y, result.z, 0);
+        }
+    }
+
+    private RaycastResult raycast(float maxDist) {
+        float[] start = new float[]{x, y + 1.62f, z}; // Добавляем смещение для глаз игрока
+        float[] dir = getPlayerLookVector();
+        float stepSize = 0.05f;
+        int steps = (int) (maxDist / stepSize);
+
+        for (int i = 0; i < steps; i++) {
+            float[] currentPos = new float[]{
+                    start[0] + dir[0] * stepSize * i,
+                    start[1] + dir[1] * stepSize * i,
+                    start[2] + dir[2] * stepSize * i
+            };
+
+            int blockX = (int) Math.floor(currentPos[0]);
+            int blockY = (int) Math.floor(currentPos[1]);
+            int blockZ = (int) Math.floor(currentPos[2]);
+
+            if (isBlockAt(blockX, blockY, blockZ)) {
+                BlockFace face = getHitFace(currentPos, new float[]{blockX, blockY, blockZ});
+                return new RaycastResult(blockX, blockY, blockZ, face);
+            }
+        }
+
+        return null;
+    }
+
+    private float[] getPlayerLookVector() {
+        float dirX = (float) (Math.sin(Math.toRadians(rotY)) * Math.cos(Math.toRadians(rotX)));
+        float dirY = (float) -Math.sin(Math.toRadians(rotX));
+        float dirZ = (float) (-Math.cos(Math.toRadians(rotY)) * Math.cos(Math.toRadians(rotX)));
+
+        float length = (float) Math.sqrt(dirX * dirX + dirY * dirY + dirZ * dirZ);
+        return new float[]{dirX / length, dirY / length, dirZ / length};
+    }
+    private boolean isBlockIntersectingPlayer(int blockX, int blockY, int blockZ) {
+        float playerMinX = x - 0.3f;
+        float playerMaxX = x + 0.3f;
+        float playerMinY = y - 1.8f;
+        float playerMaxY = y;
+        float playerMinZ = z - 0.3f;
+        float playerMaxZ = z + 0.3f;
+
+        return (blockX < playerMaxX && blockX + 1 > playerMinX) &&
+                (blockY < playerMaxY && blockY + 1 > playerMinY) &&
+                (blockZ < playerMaxZ && blockZ + 1 > playerMinZ);
+    }
+
+    private RaycastResult raycastBlock(float[] start, float[] dir, float maxDist) {
+        float stepSize = 0.1f;
+        int steps = (int) (maxDist / stepSize);
+
+        for (int i = 0; i < steps; i++) {
+            float[] currentPos = new float[]{
+                    start[0] + dir[0] * stepSize * i,
+                    start[1] + dir[1] * stepSize * i,
+                    start[2] + dir[2] * stepSize * i
+            };
+
+            int blockX = (int) Math.floor(currentPos[0]);
+            int blockY = (int) Math.floor(currentPos[1]);
+            int blockZ = (int) Math.floor(currentPos[2]);
+
+            if (isBlockAt(blockX, blockY, blockZ)) {
+                BlockFace face = getHitFace(currentPos, new float[]{blockX, blockY, blockZ});
+                return new RaycastResult(blockX, blockY, blockZ, face);
+            }
+        }
+
+        return null;
+    }
+
+
+    private BlockFace getHitFace(float[] hitPoint, float[] blockPos) {
+        float epsilon = 0.001f;
+        float dx = hitPoint[0] - blockPos[0];
+        float dy = hitPoint[1] - blockPos[1];
+        float dz = hitPoint[2] - blockPos[2];
+
+        if (Math.abs(dx) < epsilon) return BlockFace.WEST;
+        if (Math.abs(dx - 1) < epsilon) return BlockFace.EAST;
+        if (Math.abs(dy) < epsilon) return BlockFace.DOWN;
+        if (Math.abs(dy - 1) < epsilon) return BlockFace.UP;
+        if (Math.abs(dz) < epsilon) return BlockFace.NORTH;
+        if (Math.abs(dz - 1) < epsilon) return BlockFace.SOUTH;
+
+        // Если не попали точно в грань, выбираем ближайшую
+        float[] distances = {dx, 1-dx, dy, 1-dy, dz, 1-dz};
+        int minIndex = 0;
+        for (int i = 1; i < 6; i++) {
+            if (distances[i] < distances[minIndex]) {
+                minIndex = i;
+            }
+        }
+
+        switch (minIndex) {
+            case 0: return BlockFace.WEST;
+            case 1: return BlockFace.EAST;
+            case 2: return BlockFace.DOWN;
+            case 3: return BlockFace.UP;
+            case 4: return BlockFace.NORTH;
+            case 5: return BlockFace.SOUTH;
+            default: return BlockFace.UP; // Никогда не должно произойти
+        }
+    }
+
+
+    private void placeBlock1() {
         int[] targetedBlock = getTargetedBlock();
         if (targetedBlock != null) {
             int tx = targetedBlock[0];
@@ -277,14 +459,14 @@ public class MiniMinecraft {
             float dirZ = (float) -Math.cos(Math.toRadians(rotY)) * (float) Math.cos(Math.toRadians(-rotX));
 
             int placeX = (int) (x + dirX * 1.5);
-            int placeY = (int) (y + dirY * 1.5);
+            int placeY = (int) ((y) + dirY * 1.5); // Вычитаем 2 из y, чтобы учесть новую высоту игрока
             int placeZ = (int) (z + dirZ * 1.5);
 
             setBlock(placeX, placeY, placeZ, selectedBlock);
         }
     }
 
-    private void breakBlock() {
+    private void breakBlock1() {
         int[] targetedBlock = getTargetedBlock();
         if (targetedBlock != null) {
             setBlock(targetedBlock[0], targetedBlock[1], targetedBlock[2], 0);
@@ -306,7 +488,7 @@ public class MiniMinecraft {
     private int[] getTargetedBlock() {
         for (int dist = 0; dist < 5; dist++) {
             int tx = (int) (x + Math.sin(Math.toRadians(rotY)) * dist);
-            int ty = (int) (y - Math.sin(Math.toRadians(rotX)) * dist);
+            int ty = (int) ((y) - Math.sin(Math.toRadians(rotX)) * dist); // Вычитаем 2 из y
             int tz = (int) (z - Math.cos(Math.toRadians(rotY)) * dist);
 
             if (isBlockAt(tx, ty, tz)) {
@@ -509,11 +691,116 @@ public class MiniMinecraft {
             glDisableClientState(GL_VERTEX_ARRAY);
             glDisableClientState(GL_COLOR_ARRAY);
 
+            // Рендерим подсвеченную грань
+            RaycastResult highlightedBlock = raycast(5.0f);
+            if (highlightedBlock != null &&
+                    highlightedBlock.x / CHUNK_SIZE == this.x &&
+                    highlightedBlock.z / CHUNK_SIZE == this.z) {
+                renderHighlightedFace(highlightedBlock);
+            }
+
             glPopMatrix();
         }
+
+        private void renderHighlightedFace(RaycastResult result) {
+            glDisable(GL_TEXTURE_2D);
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+            glBegin(GL_QUADS);
+            glColor4f(1.0f, 1.0f, 1.0f, 0.4f);
+
+            float x = result.x % CHUNK_SIZE;
+            float y = result.y;
+            float z = result.z % CHUNK_SIZE;
+            float e = 0.002f; // небольшое смещение для предотвращения z-fighting
+
+            // Рисуем все грани с небольшим смещением
+            // UP
+            glVertex3f(x - e, y + 1 + e, z - e);
+            glVertex3f(x + 1 + e, y + 1 + e, z - e);
+            glVertex3f(x + 1 + e, y + 1 + e, z + 1 + e);
+            glVertex3f(x - e, y + 1 + e, z + 1 + e);
+
+            // DOWN
+            glVertex3f(x - e, y - e, z - e);
+            glVertex3f(x - e, y - e, z + 1 + e);
+            glVertex3f(x + 1 + e, y - e, z + 1 + e);
+            glVertex3f(x + 1 + e, y - e, z - e);
+
+            // NORTH
+            glVertex3f(x - e, y - e, z - e);
+            glVertex3f(x + 1 + e, y - e, z - e);
+            glVertex3f(x + 1 + e, y + 1 + e, z - e);
+            glVertex3f(x - e, y + 1 + e, z - e);
+
+            // SOUTH
+            glVertex3f(x - e, y - e, z + 1 + e);
+            glVertex3f(x - e, y + 1 + e, z + 1 + e);
+            glVertex3f(x + 1 + e, y + 1 + e, z + 1 + e);
+            glVertex3f(x + 1 + e, y - e, z + 1 + e);
+
+            // WEST
+            glVertex3f(x - e, y - e, z - e);
+            glVertex3f(x - e, y + 1 + e, z - e);
+            glVertex3f(x - e, y + 1 + e, z + 1 + e);
+            glVertex3f(x - e, y - e, z + 1 + e);
+
+            // EAST
+            glVertex3f(x + 1 + e, y - e, z - e);
+            glVertex3f(x + 1 + e, y - e, z + 1 + e);
+            glVertex3f(x + 1 + e, y + 1 + e, z + 1 + e);
+            glVertex3f(x + 1 + e, y + 1 + e, z - e);
+
+            glEnd();
+
+            glDisable(GL_BLEND);
+            glEnable(GL_TEXTURE_2D);
+        }
+
     }
+
+
 
     public static void main(String[] args) {
         new MiniMinecraft().run();
     }
+
+    private enum BlockFace {
+        UP(0, 1, 0),
+        DOWN(0, -1, 0),
+        NORTH(0, 0, -1),
+        SOUTH(0, 0, 1),
+        WEST(-1, 0, 0),
+        EAST(1, 0, 0);
+
+        private final int offsetX, offsetY, offsetZ;
+
+        BlockFace(int offsetX, int offsetY, int offsetZ) {
+            this.offsetX = offsetX;
+            this.offsetY = offsetY;
+            this.offsetZ = offsetZ;
+        }
+
+        public int getOffsetX() { return offsetX; }
+        public int getOffsetY() { return offsetY; }
+        public int getOffsetZ() { return offsetZ; }
+    }
+
+
+
+    private static class RaycastResult {
+        int x, y, z;
+        BlockFace face;
+
+        RaycastResult(int x, int y, int z, BlockFace face) {
+            this.x = x;
+            this.y = y;
+            this.z = z;
+            this.face = face;
+        }
+    }
 }
+
+
+
